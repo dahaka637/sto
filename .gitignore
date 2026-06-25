@@ -1,0 +1,45 @@
+# Build outputs
+/build/
+/out/
+/cmake-build-*/
+
+# Visual Studio / MSVC
+/.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.pdb
+*.ilk
+*.obj
+*.log
+
+# Runtime data generated beside the executable
+data/
+*.db
+*.db-shm
+*.db-wal
+crash_reports/
+*.dmp
+
+# Packaged runtime dependencies copied by CMake
+runtime/
+src/runtime/
+assets/fonts/
+assets/transcription-prompts/
+
+# Local environment files
+.env
+*.local
+.claude/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local scratch/reference files
+auto_transcricao_esboco.html
+
+# OS clutter
+Thumbs.db
+Desktop.ini

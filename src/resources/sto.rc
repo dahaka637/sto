@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDI_STO_APP ICON "app.ico"

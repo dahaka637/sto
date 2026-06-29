@@ -2,6 +2,7 @@
 
 #include "core/database/PromptRepository.hpp"
 #include "imgui.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "ui/Theme.hpp"
 
 #include <algorithm>
@@ -140,9 +141,9 @@ std::array<float, 3> hex_to_color(const std::string& color) {
 struct PromptModule {
     sto::database::PromptRepository repository;
     std::vector<sto::database::Prompt> prompts;
-    std::array<char, 32768> source_text{};
+    std::string source_text;
     std::array<char, 256> editor_title{};
-    std::array<char, 32768> editor_content{};
+    std::string editor_content;
     std::array<float, 3> editor_color{1.00F, 1.00F, 1.00F};
     std::string editor_icon = kIconWand;
     std::string pending_icon = kIconWand;
@@ -188,7 +189,7 @@ struct PromptModule {
     void clear_editor() {
         editor_id = 0;
         editor_title.fill('\0');
-        editor_content.fill('\0');
+        editor_content.clear();
         editor_color = {1.00F, 1.00F, 1.00F};
         editor_icon = kIconWand;
         pending_icon = editor_icon;
@@ -197,18 +198,18 @@ struct PromptModule {
     void load_editor(const sto::database::Prompt& prompt) {
         editor_id = prompt.id;
         std::snprintf(editor_title.data(), editor_title.size(), "%s", prompt.title.c_str());
-        std::snprintf(editor_content.data(), editor_content.size(), "%s", prompt.content.c_str());
+        editor_content = prompt.content;
         editor_color = hex_to_color(prompt.color);
         editor_icon = prompt.icon.empty() ? kIconWand : prompt.icon;
         pending_icon = editor_icon;
     }
 
     void save_editor() {
-        if (editor_title[0] == '\0' || editor_content[0] == '\0') {
+        if (editor_title[0] == '\0' || editor_content.empty()) {
             set_status("Informe o título e o conteúdo do prompt.", NoteKind::warning);
             return;
         }
-        sto::database::Prompt prompt{editor_id, editor_title.data(), editor_content.data(), color_to_hex(editor_color), editor_icon};
+        sto::database::Prompt prompt{editor_id, editor_title.data(), editor_content, color_to_hex(editor_color), editor_icon};
         std::string error;
         if (!repository.save(prompt, error)) {
             set_status("Não foi possível salvar: " + error, NoteKind::error);
@@ -314,21 +315,21 @@ void render_composer(PromptModule& module) {
     ImGui::Spacing();
     ImGui::TextColored(kMuted, "Texto adicional para enviar à IA");
     ImGui::InputTextMultiline(
-        "##source-text", module.source_text.data(), module.source_text.size(), {-1.0F, -106.0F},
+        "##source-text", &module.source_text, {-1.0F, -106.0F},
         ImGuiInputTextFlags_WordWrap
     );
     ImGui::Spacing();
     const float button_spacing = ImGui::GetStyle().ItemSpacing.x;
     const float button_width = (ImGui::GetContentRegionAvail().x - button_spacing) * 0.5F;
     if (colored_button(label(kIconTrash, "Limpar texto"), {button_width, 38.0F}, kRed)) {
-        module.source_text.fill('\0');
+        module.source_text.clear();
         module.set_status("Texto limpo com sucesso.");
     }
     ImGui::SameLine();
     if (colored_button(label(kIconCopy, "Copiar prompt completo"), {button_width, 38.0F}, kGreen)) {
         if (const auto* selected = module.selected()) {
             std::string composed = selected->content;
-            if (module.source_text[0] != '\0') composed += "\n\nTexto para análise:\n" + std::string(module.source_text.data());
+            if (!module.source_text.empty()) composed += "\n\nTexto para análise:\n" + module.source_text;
             const bool copied = copy_to_clipboard(composed);
             module.set_status(
                 copied ? "Conteúdo copiado para a área de transferência." : "Não foi possível acessar a área de transferência.",
@@ -381,7 +382,7 @@ void render_library(PromptModule& module) {
     ImGui::Spacing();
     ImGui::TextColored(kMuted, "Conteúdo do prompt");
     ImGui::InputTextMultiline(
-        "##editor-content", module.editor_content.data(), module.editor_content.size(), {-1.0F, -104.0F},
+        "##editor-content", &module.editor_content, {-1.0F, -104.0F},
         ImGuiInputTextFlags_WordWrap
     );
     ImGui::Spacing();

@@ -8,6 +8,7 @@
 #include "core/platform/ProcessRunner.hpp"
 #include "core/text/PortugueseDate.hpp"
 #include "imgui.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "ui/Theme.hpp"
 
 #include <array>
@@ -168,10 +169,10 @@ std::string btn(const char* icon, const char* text) {
 
 struct Session {
     long long id = 0;
-    std::array<char, 512>    display_name{};
-    std::array<char, 256>    description{};
+    std::string              display_name;
+    std::string              description;
     std::filesystem::path    input;
-    std::array<char, 131072> transcript{};
+    std::string              transcript;
     Status                   status = Status::idle;
     int                      queue_order = 0;
 
@@ -297,9 +298,9 @@ struct State {
                 session->id = s.id;
                 session->input = s.input_path;
                 session->queue_order = s.queue_order;
-                std::snprintf(session->display_name.data(), session->display_name.size(), "%s", s.display_name.c_str());
-                std::snprintf(session->description.data(), session->description.size(), "%s", s.description.c_str());
-                std::snprintf(session->transcript.data(), session->transcript.size(), "%s", s.transcript.c_str());
+                session->display_name = s.display_name;
+                session->description = s.description;
+                session->transcript = s.transcript;
                 // Resume paused sessions as idle
                 if (s.status == "queued" || s.status == "running" || s.status == "paused")
                     session->status = Status::paused;
@@ -328,10 +329,10 @@ struct State {
         if (!database_ready || !s) return;
         sto::database::AudioSession stored;
         stored.id           = s->id;
-        stored.display_name = s->display_name.data();
-        stored.description  = s->description.data();
+        stored.display_name = s->display_name;
+        stored.description  = s->description;
         stored.input_path   = narrow(s->input.wstring());
-        stored.transcript   = s->transcript.data();
+        stored.transcript   = s->transcript;
         stored.queue_order  = s->queue_order;
         switch (s->status) {
         case Status::completed: stored.status = "completed"; break;
@@ -382,7 +383,7 @@ struct State {
         const bool overwrites_transcript = std::any_of(queue_selection.begin(), queue_selection.end(),
             [this](long long id) {
                 auto s = find_session(id);
-                return s && !s->busy() && !s->input.empty() && s->transcript[0] != '\0';
+                return s && !s->busy() && !s->input.empty() && !s->transcript.empty();
             });
         if (overwrites_transcript) {
             requeue_overwrite_confirmation = true;
@@ -433,7 +434,7 @@ void transcribe_session(State& module, std::shared_ptr<Session> session) {
     session->estimated_seconds = 0.0;
     session->projected_total_seconds = 0.0;
     session->transcribing = false;
-    session->transcript.fill('\0');
+    session->transcript.clear();
     module.save_session(session);
 
     const auto tmp = std::filesystem::temp_directory_path() / L"sto_audio_transcription";
@@ -552,7 +553,7 @@ void transcribe_session(State& module, std::shared_ptr<Session> session) {
     std::ifstream f(txt);
     std::string raw((std::istreambuf_iterator<char>(f)), {});
     const std::string joined = join_transcript_lines(raw);
-    std::snprintf(session->transcript.data(), session->transcript.size(), "%s", joined.c_str());
+    session->transcript = joined;
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - transcription_started).count();
     if (media_duration > 0.0 && elapsed > 0.0) {
         std::string history_error;
@@ -750,19 +751,19 @@ void generate_audio_document(State& module) {
 
     int idx = 0;
     for (const auto& s : module.sessions) {
-        if (s->status != Status::completed || s->transcript[0] == '\0') continue;
+        if (s->status != Status::completed || s->transcript.empty()) continue;
         ++idx;
         body += "  <div class=\"audio-entry\">\n";
         body += "    <div class=\"audio-title\">";
         body += render_audio_entry_title_template(
             audio_entry_title_template,
             roman_numeral(idx),
-            s->display_name.data(),
-            s->description.data());
+            s->display_name,
+            s->description);
         body += "</div>\n";
         body += "    <div class=\"transcricao-box\">\n";
         body += "      <p class=\"justified\">";
-        body += document_html::escape_html(s->transcript.data());
+        body += document_html::escape_html(s->transcript);
         body += "</p>\n    </div>\n  </div>\n\n";
     }
 
@@ -920,13 +921,13 @@ void render_station(State& module, Session& session) {
     // Nome + descrição
     ImGui::TextColored(kMuted, "Nome do arquivo");
     ImGui::SetNextItemWidth(-1.0F);
-    if (ImGui::InputText("##dn", session.display_name.data(), session.display_name.size()))
+    if (ImGui::InputText("##dn", &session.display_name))
         module.save_session(module.selected);
     ImGui::TextColored(kMuted, "Descrição");
     ImGui::SameLine(); ImGui::TextColored(kSubtle, "(opcional)");
     ImGui::SetNextItemWidth(-1.0F);
     if (ImGui::InputTextWithHint("##desc", "Ex: Mensagem de voz de João, gravação da reunião...",
-            session.description.data(), session.description.size()))
+            &session.description))
         module.save_session(module.selected);
     ImGui::Spacing();
     ImGui::TextColored(kSilver, "TEXTO DA TRANSCRIÇÃO");
@@ -961,7 +962,7 @@ void render_station(State& module, Session& session) {
         ImGui::SetWindowFontScale(1.00F);
     } else {
         ImGui::InputTextMultiline("##transcript-inner",
-            session.transcript.data(), session.transcript.size(),
+            &session.transcript,
             {-1.0F, -1.0F}, ImGuiInputTextFlags_WordWrap);
     }
     ImGui::EndChild();
@@ -990,7 +991,7 @@ void render_station(State& module, Session& session) {
             session.set_message("Transcrição pausada. Clique em Transcrever para reativar.");
             module.save_session(module.selected);
         }
-        else if (session.transcript[0] != '\0') {
+        else if (!session.transcript.empty()) {
             module.retranscribe_confirmation = true;
         }
         else {
@@ -1001,7 +1002,7 @@ void render_station(State& module, Session& session) {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::BeginDisabled(session.transcript[0] == '\0');
+    ImGui::BeginDisabled(session.transcript.empty());
     if (colored_button(btn(kIconPdf, "Gerar Auto"), {btn_w, btn_h}, kGreen))
         module.show_gen_confirm = true;
     ImGui::EndDisabled();
@@ -1040,7 +1041,7 @@ void render_station(State& module, Session& session) {
         if (ImGui::Button("Manter conteúdo", {150.0F, 36.0F})) module.clear_confirmation = false;
         ImGui::SameLine();
         if (colored_button("Limpar conteúdo", {150.0F, 36.0F}, kRed)) {
-            session.transcript.fill('\0');
+            session.transcript.clear();
             session.status = Status::idle;
             module.save_session(module.selected);
             module.clear_confirmation = false;
@@ -1082,7 +1083,7 @@ void render_queue_sidebar(State& module) {
                     s->id = as.id;
                     s->input = f;
                     s->queue_order = as.queue_order;
-                    std::snprintf(s->display_name.data(), s->display_name.size(), "%s", as.display_name.c_str());
+                    s->display_name = as.display_name;
                     module.sessions.push_back(s);
                     if (!module.selected) module.selected = s;
                 }
@@ -1111,7 +1112,7 @@ void render_queue_sidebar(State& module) {
             ImGui::PushStyleColor(ImGuiCol_Text, status_color(s->status));
             ImGui::Button(status_icon(s->status), {32.0F, 32.0F});
             if (ImGui::IsItemClicked()) module.set_single_selection(s);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s->display_name.data());
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s->display_name.c_str());
             ImGui::PopStyleColor();
         } else {
             // Row background
@@ -1134,7 +1135,7 @@ void render_queue_sidebar(State& module) {
             draw->AddText({row_min.x + 8.0F, row_min.y + 6.0F},
                 ImGui::GetColorU32(status_color(s->status)), status_icon(s->status));
             {
-                std::string dname = s->display_name.data();
+                std::string dname = s->display_name;
                 if (dname.size() > 28) dname = dname.substr(0, 25) + "...";
                 draw->AddText({row_min.x + 26.0F, row_min.y + 6.0F},
                     ImGui::GetColorU32(kWhite), dname.c_str());
@@ -1313,7 +1314,7 @@ void render_gen_confirm(State& module) {
         ImGui::TextColored(kWhite, "Gerar Auto de Transcrição de Áudios?");
         ImGui::Spacing();
         const int completed = static_cast<int>(std::count_if(module.sessions.begin(), module.sessions.end(),
-            [](const auto& s){ return s->status == Status::completed && s->transcript[0] != '\0'; }));
+            [](const auto& s){ return s->status == Status::completed && !s->transcript.empty(); }));
         ImGui::TextColored(kMuted, "O documento incluirá %d arquivo(s) com transcrição concluída.", completed);
         ImGui::Spacing();
         ImGui::Separator();

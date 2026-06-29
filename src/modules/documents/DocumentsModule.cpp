@@ -7,6 +7,7 @@
 #include "core/platform/FileDialogs.hpp"
 #include "core/text/PortugueseDate.hpp"
 #include "imgui.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "ui/Theme.hpp"
 
 // Markers replaced at document generation time:
@@ -441,7 +442,7 @@ struct State {
     int tipo_procedimento = 0;
     std::array<char, 64> numero_procedimento{};
     std::array<char, 256> local_depoimento_especial{};
-    std::array<char, 32768> relato{};
+    std::string relato;
     std::array<char, 256> nome_responsavel{};
     std::array<char, 128> cargo_responsavel{};
 
@@ -449,7 +450,7 @@ struct State {
     std::array<char, 256> general_nome_parte{};
     std::array<char, 128> general_qualificacao{};
     std::array<char, 11> general_data_oitiva{};
-    std::array<char, 32768> general_relato{};
+    std::string general_relato;
     std::vector<GeneralTranscriptionEntry> general_oitivas;
     std::size_t next_general_order = 0;
     int general_selected_oitiva = -1;
@@ -468,19 +469,19 @@ struct State {
     std::chrono::steady_clock::time_point message_shown_at;
     std::filesystem::path html_path;
 
-    std::array<char, 512>  tmpl_header_text{};
-    std::array<char, 256>  tmpl_footer_text{};
-    std::array<char, 4096> tmpl_intro_auto{};
-    std::array<char, 4096> tmpl_intro_geral{};
-    std::array<char, 1024> tmpl_closing_auto{};
-    std::array<char, 1024> tmpl_closing_geral{};
-    std::array<char, 512>  tmpl_oitiva_geral{};
-    std::array<char, 256>  tmpl_audio_title{};
-    std::array<char, 4096> tmpl_audio_intro{};
-    std::array<char, 512>  tmpl_audio_entry_title{};
-    std::array<char, 1024> tmpl_audio_closing{};
-    std::array<char, 2048> tmpl_audio_note_whisper{};
-    std::array<char, 2048> tmpl_audio_note_model{};
+    std::string            tmpl_header_text;
+    std::string            tmpl_footer_text;
+    std::string            tmpl_intro_auto;
+    std::string            tmpl_intro_geral;
+    std::string            tmpl_closing_auto;
+    std::string            tmpl_closing_geral;
+    std::string            tmpl_oitiva_geral;
+    std::string            tmpl_audio_title;
+    std::string            tmpl_audio_intro;
+    std::string            tmpl_audio_entry_title;
+    std::string            tmpl_audio_closing;
+    std::string            tmpl_audio_note_whisper;
+    std::string            tmpl_audio_note_model;
     std::string            tmpl_logo_path;
     int                    tmpl_selector = 0;
 
@@ -498,8 +499,8 @@ struct State {
 
             const auto tmpl = repository.load_template(error);
             tmpl_logo_path = tmpl.logo_path;
-            auto cp = [](auto& arr, const std::string& s) {
-                std::snprintf(arr.data(), arr.size(), "%s", s.c_str());
+            auto cp = [](std::string& target, const std::string& source) {
+                target = source;
             };
             cp(tmpl_header_text,   tmpl.header_text);
             cp(tmpl_footer_text,   tmpl.footer_text);
@@ -583,11 +584,11 @@ void generate_document(State& module, const FormData& form) {
     document_html::PagedDocument doc;
     doc.browser_title  = browser_title;
     doc.document_title = "AUTO DE TRANSCRIÇÃO";
-    doc.header_html    = header_text_to_html(module.tmpl_header_text.data());
-    doc.footer_html    = footer_text_to_html(module.tmpl_footer_text.data());
+    doc.header_html    = header_text_to_html(module.tmpl_header_text);
+    doc.footer_html    = footer_text_to_html(module.tmpl_footer_text);
     doc.extra_style    = auto_transcricao_style();
     doc.body_html      = build_auto_transcricao_body(form,
-        module.tmpl_intro_auto.data(), module.tmpl_closing_auto.data());
+        module.tmpl_intro_auto, module.tmpl_closing_auto);
     const std::string html = document_html::build_paged_html(doc, assets);
 
     const auto temp_directory = documents_temp_directory();
@@ -661,12 +662,12 @@ void generate_document(State& module, const GeneralFormData& form) {
     document_html::PagedDocument doc_g;
     doc_g.browser_title  = browser_title_g;
     doc_g.document_title = "AUTO DE TRANSCRIÇÃO";
-    doc_g.header_html    = header_text_to_html(module.tmpl_header_text.data());
-    doc_g.footer_html    = footer_text_to_html(module.tmpl_footer_text.data());
+    doc_g.header_html    = header_text_to_html(module.tmpl_header_text);
+    doc_g.footer_html    = footer_text_to_html(module.tmpl_footer_text);
     doc_g.extra_style    = auto_transcricao_geral_style();
     doc_g.body_html      = build_auto_transcricao_geral_body(form,
-        module.tmpl_intro_geral.data(), module.tmpl_closing_geral.data(),
-        module.tmpl_oitiva_geral.data());
+        module.tmpl_intro_geral, module.tmpl_closing_geral,
+        module.tmpl_oitiva_geral);
     const std::string html = document_html::build_paged_html(doc_g, assets);
 
     const auto temp_directory = documents_temp_directory();
@@ -821,7 +822,7 @@ void start_generation(State& module) {
         module.validation_error = "Informe o nome da parte.";
         return;
     }
-    if (module.relato[0] == '\0') {
+    if (module.relato.empty()) {
         module.validation_error = "Informe o relato da oitiva.";
         return;
     }
@@ -837,7 +838,7 @@ void start_generation(State& module) {
     const FormData form{
         module.nome_delegado.data(), module.tipo_oitiva, module.nome_parte.data(),
         module.data_oitiva.data(), module.tipo_procedimento, module.numero_procedimento.data(),
-        module.local_depoimento_especial.data(), module.relato.data(), module.nome_responsavel.data(), module.cargo_responsavel.data()
+        module.local_depoimento_especial.data(), module.relato, module.nome_responsavel.data(), module.cargo_responsavel.data()
     };
 
     generate_document(module, form);
@@ -849,7 +850,7 @@ bool auto_transcricao_has_content(const State& module) {
         || module.data_oitiva[0] != '\0'
         || module.tipo_procedimento != 0
         || module.numero_procedimento[0] != '\0'
-        || module.relato[0] != '\0';
+        || !module.relato.empty();
 }
 
 void clear_auto_transcricao_content(State& module) {
@@ -858,7 +859,7 @@ void clear_auto_transcricao_content(State& module) {
     module.data_oitiva.fill('\0');
     module.tipo_procedimento = 0;
     module.numero_procedimento.fill('\0');
-    module.relato.fill('\0');
+    module.relato.clear();
     module.reset_status();
 }
 
@@ -869,7 +870,7 @@ void clear_general_current_oitiva(State& module, bool reset_tipo) {
     }
     module.general_nome_parte.fill('\0');
     module.general_data_oitiva.fill('\0');
-    module.general_relato.fill('\0');
+    module.general_relato.clear();
 }
 
 bool has_selected_general_oitiva(const State& module) {
@@ -885,7 +886,7 @@ void load_general_oitiva_to_editor(State& module, std::size_t index) {
     std::snprintf(module.general_nome_parte.data(), module.general_nome_parte.size(), "%s", entry.nome_parte.c_str());
     std::snprintf(module.general_qualificacao.data(), module.general_qualificacao.size(), "%s", entry.qualificacao.c_str());
     std::snprintf(module.general_data_oitiva.data(), module.general_data_oitiva.size(), "%s", entry.data_oitiva.c_str());
-    std::snprintf(module.general_relato.data(), module.general_relato.size(), "%s", entry.relato.c_str());
+    module.general_relato = entry.relato;
     module.reset_status();
 }
 
@@ -898,7 +899,7 @@ void sync_general_editor_to_selected(State& module) {
         ? module.general_qualificacao.data()
         : qualificacao_padrao(module.general_tipo_oitiva);
     entry.data_oitiva = module.general_data_oitiva.data();
-    entry.relato = module.general_relato.data();
+    entry.relato = module.general_relato;
 }
 
 void create_general_oitiva_draft(State& module) {
@@ -931,7 +932,7 @@ bool auto_transcricao_geral_has_content(const State& module) {
         || !module.general_oitivas.empty()
         || module.general_nome_parte[0] != '\0'
         || module.general_data_oitiva[0] != '\0'
-        || module.general_relato[0] != '\0';
+        || !module.general_relato.empty();
 }
 
 void clear_auto_transcricao_geral_content(State& module) {
@@ -1232,7 +1233,7 @@ void render_auto_transcricao(State& module) {
         const auto snap = sto::modules::transcription::get_selected_session_snapshot();
         if (snap.has_session && snap.session_id != module.last_session_id_transcricao) {
             module.last_session_id_transcricao = snap.session_id;
-            if (module.relato[0] == '\0') {
+            if (module.relato.empty()) {
                 std::snprintf(module.nome_parte.data(), module.nome_parte.size(), "%s", snap.party_name.c_str());
                 module.tipo_oitiva = std::max(0, snap.hearing_type - 1);
                 std::snprintf(module.data_oitiva.data(), module.data_oitiva.size(), "%s", snap.date_oitiva.c_str());
@@ -1331,7 +1332,7 @@ void render_auto_transcricao(State& module) {
     const float relato_height = std::max(relato_min_height, ImGui::GetContentRegionAvail().y - reserved_below_relato);
 
     ImGui::InputTextMultiline(
-        "##relato", module.relato.data(), module.relato.size(), {-1.0F, relato_height},
+        "##relato", &module.relato, {-1.0F, relato_height},
         ImGuiInputTextFlags_WordWrap
     );
     ImGui::Spacing();
@@ -1389,7 +1390,7 @@ void render_auto_transcricao_geral(State& module) {
         const auto snap = sto::modules::transcription::get_selected_session_snapshot();
         if (snap.has_session && snap.session_id != module.last_session_id_geral) {
             module.last_session_id_geral = snap.session_id;
-            if (module.general_relato[0] == '\0') {
+            if (module.general_relato.empty()) {
                 module.general_tipo_oitiva = std::max(0, snap.hearing_type - 1);
                 std::snprintf(module.general_nome_parte.data(), module.general_nome_parte.size(), "%s", snap.party_name.c_str());
                 const std::string qual = qualificacao_padrao(module.general_tipo_oitiva);
@@ -1507,7 +1508,7 @@ void render_auto_transcricao_geral(State& module) {
         ImGui::GetContentRegionAvail().y - 46.0F - 36.0F - ImGui::GetTextLineHeightWithSpacing() * 4.0F - style.ItemSpacing.y * 8.0F
     );
     ImGui::InputTextMultiline(
-        "##geral-relato", module.general_relato.data(), module.general_relato.size(), {-1.0F, relato_height},
+        "##geral-relato", &module.general_relato, {-1.0F, relato_height},
         ImGuiInputTextFlags_WordWrap
     );
     ImGui::Spacing();
@@ -1692,33 +1693,33 @@ void render_document_settings() {
 
         // Cabeçalho
         ImGui::TextColored(kMuted, "Cabeçalho (linhas exibidas abaixo da logo, uma por linha)");
-        ImGui::InputTextMultiline("##hdr", module.tmpl_header_text.data(), module.tmpl_header_text.size(),
+        ImGui::InputTextMultiline("##hdr", &module.tmpl_header_text,
             {-1.0F, field_h});
         ImGui::Spacing();
 
         if (is_audio) {
             ImGui::TextColored(kMuted, "Título do documento");
-            ImGui::InputText("##audio-title", module.tmpl_audio_title.data(), module.tmpl_audio_title.size());
+            ImGui::InputText("##audio-title", &module.tmpl_audio_title);
             ImGui::Spacing();
         }
 
         // Parágrafo introdutório
         auto& intro_buf = is_audio ? module.tmpl_audio_intro : is_geral ? module.tmpl_intro_geral : module.tmpl_intro_auto;
         ImGui::TextColored(kMuted, "Parágrafo introdutório");
-        ImGui::InputTextMultiline("##intro", intro_buf.data(), intro_buf.size(),
+        ImGui::InputTextMultiline("##intro", &intro_buf,
             {-1.0F, intro_actual}, ImGuiInputTextFlags_WordWrap);
         ImGui::Spacing();
 
         // Título de cada oitiva (apenas no Geral)
         if (is_geral) {
             ImGui::TextColored(kMuted, "Título de cada oitiva (o numeral romano é adicionado automaticamente)");
-            ImGui::InputTextMultiline("##oitiva-tmpl", module.tmpl_oitiva_geral.data(), module.tmpl_oitiva_geral.size(),
+            ImGui::InputTextMultiline("##oitiva-tmpl", &module.tmpl_oitiva_geral,
                 {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
             ImGui::Spacing();
         }
         if (is_audio) {
             ImGui::TextColored(kMuted, "Título de cada arquivo de áudio");
-            ImGui::InputTextMultiline("##audio-entry-title", module.tmpl_audio_entry_title.data(), module.tmpl_audio_entry_title.size(),
+            ImGui::InputTextMultiline("##audio-entry-title", &module.tmpl_audio_entry_title,
                 {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
             ImGui::Spacing();
         }
@@ -1726,17 +1727,17 @@ void render_document_settings() {
         // Parágrafo de encerramento
         auto& closing_buf = is_audio ? module.tmpl_audio_closing : is_geral ? module.tmpl_closing_geral : module.tmpl_closing_auto;
         ImGui::TextColored(kMuted, "Parágrafo de encerramento");
-        ImGui::InputTextMultiline("##closing", closing_buf.data(), closing_buf.size(),
+        ImGui::InputTextMultiline("##closing", &closing_buf,
             {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
         ImGui::Spacing();
 
         if (is_audio) {
             ImGui::TextColored(kMuted, "Nota de rodapé: Whisper");
-            ImGui::InputTextMultiline("##audio-note-whisper", module.tmpl_audio_note_whisper.data(), module.tmpl_audio_note_whisper.size(),
+            ImGui::InputTextMultiline("##audio-note-whisper", &module.tmpl_audio_note_whisper,
                 {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
             ImGui::Spacing();
             ImGui::TextColored(kMuted, "Nota de rodapé: modelo");
-            ImGui::InputTextMultiline("##audio-note-model", module.tmpl_audio_note_model.data(), module.tmpl_audio_note_model.size(),
+            ImGui::InputTextMultiline("##audio-note-model", &module.tmpl_audio_note_model,
                 {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
             ImGui::Spacing();
         }
@@ -1745,7 +1746,7 @@ void render_document_settings() {
         ImGui::TextColored(kMuted, "Rodapé");
         ImGui::SameLine();
         ImGui::TextColored(kSubtle, "(HTML — use <b>texto</b> para negrito, <p> para parágrafo)");
-        ImGui::InputTextMultiline("##ftr", module.tmpl_footer_text.data(), module.tmpl_footer_text.size(),
+        ImGui::InputTextMultiline("##ftr", &module.tmpl_footer_text,
             {-1.0F, field_h}, ImGuiInputTextFlags_WordWrap);
         ImGui::Spacing();
 
@@ -1801,13 +1802,13 @@ void render_document_settings() {
             if (module.database_ready) {
                 std::string error;
                 const sto::database::DocumentTemplate td{
-                    module.tmpl_header_text.data(), module.tmpl_footer_text.data(),
-                    module.tmpl_intro_auto.data(),  module.tmpl_intro_geral.data(),
-                    module.tmpl_closing_auto.data(),module.tmpl_closing_geral.data(),
-                    module.tmpl_oitiva_geral.data(),
-                    module.tmpl_audio_title.data(), module.tmpl_audio_intro.data(),
-                    module.tmpl_audio_entry_title.data(), module.tmpl_audio_closing.data(),
-                    module.tmpl_audio_note_whisper.data(), module.tmpl_audio_note_model.data(),
+                    module.tmpl_header_text, module.tmpl_footer_text,
+                    module.tmpl_intro_auto,  module.tmpl_intro_geral,
+                    module.tmpl_closing_auto,module.tmpl_closing_geral,
+                    module.tmpl_oitiva_geral,
+                    module.tmpl_audio_title, module.tmpl_audio_intro,
+                    module.tmpl_audio_entry_title, module.tmpl_audio_closing,
+                    module.tmpl_audio_note_whisper, module.tmpl_audio_note_model,
                     module.tmpl_logo_path};
                 doc_save_ok   = module.repository.save_template(td, error);
                 doc_save_note = doc_save_ok ? "" : "Erro: " + error;

@@ -6,6 +6,7 @@
 #include "core/text/PortugueseDate.hpp"
 #include "core/platform/ProcessRunner.hpp"
 #include "imgui.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "ui/TextWrap.hpp"
 #include "ui/Theme.hpp"
 
@@ -711,10 +712,10 @@ struct Session {
     std::filesystem::path input;
     std::array<char, 256> party_name{};
     std::array<char, 11> data_oitiva{};
-    std::array<char, 65536> additional_context{};
-    std::array<char, 1048576> transcript{};
-    std::array<char, 1048576> transcript_annotated{};
-    std::array<char, 1048576> transcript_display{};
+    std::string additional_context;
+    std::string transcript;
+    std::string transcript_annotated;
+    std::string transcript_display;
     int hearing_type = 0;
     int procedure = 0;
     bool show_context = false;
@@ -771,8 +772,8 @@ sto::database::TranscriptionSession stored_session(const Session& session) {
         session.id,
         narrow(session.input.wstring()),
         session.party_name.data(),
-        session.additional_context.data(),
-        session.transcript.data(),
+        session.additional_context,
+        session.transcript,
         session.hearing_type,
         session.procedure,
         session.show_context,
@@ -789,11 +790,11 @@ std::shared_ptr<Session> loaded_session(const sto::database::TranscriptionSessio
     session->input = widen(stored.input_path);
     std::snprintf(session->party_name.data(), session->party_name.size(), "%s", stored.party_name.c_str());
     std::snprintf(session->data_oitiva.data(), session->data_oitiva.size(), "%s", stored.date_oitiva.c_str());
-    std::snprintf(session->additional_context.data(), session->additional_context.size(), "%s", stored.additional_context.c_str());
+    session->additional_context = stored.additional_context;
     if (!stored.transcript.empty()) {
         const auto echo_result = process_echo_repetitions(stored.transcript);
-        std::snprintf(session->transcript.data(), session->transcript.size(), "%s", echo_result.clean.c_str());
-        std::snprintf(session->transcript_annotated.data(), session->transcript_annotated.size(), "%s", echo_result.annotated.c_str());
+        session->transcript = echo_result.clean;
+        session->transcript_annotated = echo_result.annotated;
     }
     session->hearing_type = stored.hearing_type;
     session->procedure = stored.procedure;
@@ -837,9 +838,9 @@ struct QueueKey {
 struct State {
     sto::database::TranscriptionRepository repository;
     sto::database::TranscriptionPrompts prompts;
-    std::array<char, 65536> editor_context{};
-    std::array<char, 65536> editor_traditional{};
-    std::array<char, 65536> editor_formal{};
+    std::string editor_context;
+    std::string editor_traditional;
+    std::string editor_formal;
     int editor_procedure = 0;
     bool cancel_confirmation = false;
     bool retranscribe_confirmation = false;
@@ -930,9 +931,9 @@ struct State {
     }
 
     void copy_prompts_to_editor() {
-        std::snprintf(editor_context.data(), editor_context.size(), "%s", prompts.context.c_str());
-        std::snprintf(editor_traditional.data(), editor_traditional.size(), "%s", prompts.traditional.c_str());
-        std::snprintf(editor_formal.data(), editor_formal.size(), "%s", prompts.formal.c_str());
+        editor_context = prompts.context;
+        editor_traditional = prompts.traditional;
+        editor_formal = prompts.formal;
     }
 
     void set_note(std::string value, NoteKind kind = NoteKind::success) {
@@ -1007,7 +1008,7 @@ void State::create_session() {
     {
         std::scoped_lock lock(sessions_mutex);
         const auto draft = std::find_if(sessions.begin(), sessions.end(), [](const auto& session) {
-            return session->status == Status::idle && session->input.empty() && session->transcript[0] == '\0' && session->group_id == 0;
+            return session->status == Status::idle && session->input.empty() && session->transcript.empty() && session->group_id == 0;
         });
         if (draft != sessions.end()) {
             set_single_selection(*draft);
@@ -1467,7 +1468,7 @@ void State::request_queue_selection() {
         std::scoped_lock lock(sessions_mutex);
         for (long long id : queue_selection) {
             auto session = find_session_unlocked(id);
-            if (session && !session->busy() && !session->input.empty() && session->transcript[0] != '\0') {
+            if (session && !session->busy() && !session->input.empty() && !session->transcript.empty()) {
                 overwrites_transcript = true;
                 break;
             }
@@ -1551,9 +1552,9 @@ void State::process_session(const std::shared_ptr<Session>& session) {
     session->whisper_progress = 0.0F;
     session->projected_total_seconds = 0.0;
     session->status = Status::running;
-    session->transcript.fill('\0');
-    session->transcript_annotated.fill('\0');
-    session->transcript_display.fill('\0');
+    session->transcript.clear();
+    session->transcript_annotated.clear();
+    session->transcript_display.clear();
     session->transcript_wrap_width = 0.0F;
     session->transcript_needs_wrap = false;
     session->set_message("Preparando arquivo de áudio...");
@@ -1676,8 +1677,8 @@ void State::process_session(const std::shared_ptr<Session>& session) {
     }
 
     const auto echo_result = process_echo_repetitions(read_text(txt));
-    std::snprintf(session->transcript.data(), session->transcript.size(), "%s", echo_result.clean.c_str());
-    std::snprintf(session->transcript_annotated.data(), session->transcript_annotated.size(), "%s", echo_result.annotated.c_str());
+    session->transcript = echo_result.clean;
+    session->transcript_annotated = echo_result.annotated;
     session->transcript_needs_wrap = true;
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - transcription_started).count();
     if (media_duration > 0.0 && elapsed > 0.0) {
@@ -1705,10 +1706,10 @@ bool has_meaningful_text(const char* text) {
 
 std::string composed_prompt(const State& module, const Session& session) {
     std::string output;
-    if (has_meaningful_text(session.additional_context.data())) {
+    if (has_meaningful_text(session.additional_context.c_str())) {
         output += module.prompts.context;
         output += "\n\nContextualização:\n\"";
-        output += session.additional_context.data();
+        output += session.additional_context;
         output += "\"\n\n";
     }
     output += session.procedure == 0 ? module.prompts.traditional : module.prompts.formal;
@@ -1717,7 +1718,7 @@ std::string composed_prompt(const State& module, const Session& session) {
     output += "\nNome da parte: ";
     output += session.party_name[0] == '\0' ? "Não informado" : session.party_name.data();
     output += "\n\nTexto bruto extraído do Whisper:\n\"";
-    output += session.transcript.data();
+    output += session.transcript;
     output += "\"";
     return output;
 }
@@ -1936,9 +1937,9 @@ void render_station(State& module, Session& session) {
             if (files.size() == 1) {
                 session.input = files.front();
                 session.status = Status::idle;
-                session.transcript.fill('\0');
-                session.transcript_annotated.fill('\0');
-                session.transcript_display.fill('\0');
+                session.transcript.clear();
+                session.transcript_annotated.clear();
+                session.transcript_display.clear();
                 session.transcript_wrap_width = 0.0F;
                 session.transcript_needs_wrap = false;
                 session.data_oitiva.fill('\0');
@@ -1955,7 +1956,7 @@ void render_station(State& module, Session& session) {
             } else {
                 std::shared_ptr<Session> first_added;
                 bool used_current = false;
-                if (session.status == Status::idle && session.input.empty() && session.transcript[0] == '\0') {
+                if (session.status == Status::idle && session.input.empty() && session.transcript.empty()) {
                     session.input = files.front();
                     {
                         const auto det = detect_from_filename(files.front());
@@ -2002,7 +2003,7 @@ void render_station(State& module, Session& session) {
     }
     ImGui::PopStyleColor(2);
     if (session.show_context) {
-        ImGui::InputTextMultiline("##additional-context", session.additional_context.data(), session.additional_context.size(), {-1.0F, compact ? 72.0F : 112.0F});
+        ImGui::InputTextMultiline("##additional-context", &session.additional_context, {-1.0F, compact ? 72.0F : 112.0F});
         if (ImGui::IsItemDeactivatedAfterEdit()) module.save_session(module.selected);
     }
 
@@ -2095,11 +2096,10 @@ void render_station(State& module, Session& session) {
     } else {
         const float wrap_width = std::max(120.0F, ImGui::GetContentRegionAvail().x - ImGui::GetStyle().FramePadding.x * 2.0F - sto::ui::kWrapRightMargin);
         if (session.transcript_needs_wrap.exchange(false) || std::abs(session.transcript_wrap_width - wrap_width) > 1.0F) {
-            const std::string wrapped = wrap_annotated(session.transcript_annotated.data(), wrap_width);
-            std::snprintf(session.transcript_display.data(), session.transcript_display.size(), "%s", wrapped.c_str());
+            session.transcript_display = wrap_annotated(session.transcript_annotated.c_str(), wrap_width);
             session.transcript_wrap_width = wrap_width;
         }
-        render_annotated_transcript(session.transcript_display.data());
+        render_annotated_transcript(session.transcript_display.c_str());
     }
     ImGui::EndChild();
 
@@ -2124,13 +2124,13 @@ void render_station(State& module, Session& session) {
     )) {
         if (session.busy()) module.cancel_confirmation = true;
         else if (session.status == Status::queued) module.toggle_selected_queue();
-        else if (session.transcript[0] != '\0') module.retranscribe_confirmation = true;
+        else if (!session.transcript.empty()) module.retranscribe_confirmation = true;
         else module.toggle_selected_queue();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(session.busy() || session.transcript[0] == '\0');
+    ImGui::BeginDisabled(session.busy() || session.transcript.empty());
     if (colored_button(label(kIconCopy, copy_text), {button_width, action_button_height}, kGreen)) {
         const bool copied = copy_to_clipboard(composed_prompt(module, session));
         module.set_note(
@@ -2789,14 +2789,13 @@ void render_prompt_settings() {
                  : module.editor_formal;
     ImGui::InputTextMultiline(
         "##settings-prompt-editor",
-        editor.data(),
-        editor.size(),
+        &editor,
         {-1.0F, editor_height},
         ImGuiInputTextFlags_WordWrap
     );
     ImGui::Spacing();
     if (colored_button(label(kIconSave, "Salvar configurações"), {-1.0F, 38.0F}, kGreen)) {
-        module.prompts = {module.editor_context.data(), module.editor_traditional.data(), module.editor_formal.data()};
+        module.prompts = {module.editor_context, module.editor_traditional, module.editor_formal};
         std::string error;
         const bool saved = module.repository.save_prompts(module.prompts, error);
         module.set_note(
